@@ -1,0 +1,3 @@
+mcp
+jira
+python-dotenv
