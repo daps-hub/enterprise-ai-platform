@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: enterprise-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: day@12BB
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  enterprise-ai:
+    build: .
+    container_name: enterprise-ai-platform
+    depends_on:
+      - postgres
+    ports:
+      - "8501:8501"
+    environment:
+      DB_HOST: postgres
+      DB_NAME: postgres
+      DB_USER: postgres
+      DB_PASSWORD: day@12BB
+      DB_PORT: 5432
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      JIRA_URL: ${JIRA_URL}
+      JIRA_EMAIL: ${JIRA_EMAIL}
+      JIRA_API_TOKEN: ${JIRA_API_TOKEN}
+
+volumes:
+  postgres_data:
