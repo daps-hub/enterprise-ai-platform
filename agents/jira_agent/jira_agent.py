@@ -12,7 +12,36 @@ class JiraAgent:
         self.client = get_openai_client()
         self.model = get_model_name()
         self.mcp = JiraMCPClient()
+    def normalize_mcp_result(self, result) -> dict:
+        if isinstance(result, dict):
+            return result
 
+        if isinstance(result, list) and result:
+            first_item = result[0]
+
+            if hasattr(first_item, "text"):
+                try:
+                    return json.loads(first_item.text)
+                except json.JSONDecodeError:
+                    return {
+                        "success": False,
+                        "message": first_item.text,
+                    }
+
+        return {
+            "success": False,
+            "message": str(result),
+        }
+
+    async def create_report_review_issue(self) -> dict:
+        raw_result = await self.mcp.create_issue(
+            project="KAN",
+            summary="Review Executive Sales Report",
+            description="Review the latest executive sales report.",
+            issue_type="Task",
+        )
+
+        return self.normalize_mcp_result(raw_result)
     async def choose_tool(self, user_question: str) -> dict:
         response = self.client.chat.completions.create(
             model=self.model,

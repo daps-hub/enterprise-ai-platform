@@ -1,6 +1,6 @@
 import asyncio
 import json
-
+from pathlib import Path
 
 from agents.email_agent.logger import logger
 from agents.email_agent.openai_client import get_openai_client, get_model_name
@@ -12,6 +12,65 @@ class EmailAgent:
         self.client = get_openai_client()
         self.model = get_model_name()
         self.mcp = EmailMCPClient()
+
+    
+    def normalize_mcp_result(self, result) -> dict:
+        if isinstance(result, dict):
+            return result
+
+        if isinstance(result, list) and result:
+            first_item = result[0]
+
+            if hasattr(first_item, "text"):
+                try:
+                    return json.loads(first_item.text)
+                except json.JSONDecodeError:
+                    return {
+                        "success": False,
+                        "message": first_item.text,
+                    }
+
+        return {
+            "success": False,
+            "message": str(result),
+        }
+
+    async def send_report_email(
+        self,
+        recipient: str,
+        subject: str,
+        body: str,
+        attachment_path: str,
+    ) -> dict:
+        path = Path(attachment_path)
+
+        if not path.exists():
+            return {
+                "success": False,
+                "message": f"Attachment not found: {path}",
+            }
+
+        raw_result = await self.mcp.send_email_with_attachment(
+            recipient=recipient,
+            subject=subject,
+            body=body,
+            attachment_path=str(path),
+        )
+
+        return self.normalize_mcp_result(raw_result)
+
+        return await self.mcp.send_email_with_attachment(
+            recipient=recipient,
+            subject=subject,
+            body=body,
+            attachment_path=str(path),
+        )
+
+
+
+
+
+
 
     async def choose_tool(self, user_question: str) -> dict:
         response = self.client.chat.completions.create(
@@ -35,12 +94,18 @@ class EmailAgent:
             "validate_email": lambda: self.mcp.validate_email(
                 arguments["email"]  
             ),
+
+            "send_email": lambda: self.mcp.send_email(
+                to=arguments.get("to") or arguments.get("recipient"),
+                subject=arguments["subject"],
+                body=arguments["body"],
+            ),
             "send_email_with_attachment": lambda: self.mcp.send_email_with_attachment(
-                arguments["to"],
-                arguments["subject"],
-                arguments["body"],
-                arguments["attachment_path"],
-            ),         
+                recipient=arguments.get("recipient") or arguments.get("to"),
+                subject=arguments["subject"],
+                body=arguments["body"],
+                attachment_path=arguments["attachment_path"],
+             ),         
             
         }
 

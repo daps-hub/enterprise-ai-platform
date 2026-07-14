@@ -27,9 +27,16 @@ if st.button("Run Workflow"):
             planner = PlannerAgent()
             result = asyncio.run(planner.route_request(user_question))
 
-        st.success("Workflow completed")
-        if result.get("success"):
+            if isinstance(result, str):
+                st.write(result)
 
+            elif result.get("success"):
+                st.success(result.get("message"))
+
+            else:
+                st.error(result.get("message"))
+                
+                
             st.markdown("""
             ### Workflow Status
 
@@ -107,18 +114,68 @@ if st.button("Run Workflow"):
             )
 
         if "email" in result:
-            st.success("📧 Email sent successfully.")
-            st.write(result["email"])
+            
+            st.subheader("📧 Email")
+
+            email_result = result["email"]
+
+            if isinstance(email_result, dict):
+                if email_result.get("success"):
+                    st.success(
+                        email_result.get(
+                            "message",
+                            "Email sent successfully.",
+                        )
+                    )
+                else:
+                    st.error(
+                        email_result.get(
+                            "message",
+                            "Email sending failed.",
+                        )
+                    )
+
+                st.json(email_result)
+
+            else:
+                st.write(email_result)
         if "jira" in result:
+            
             st.subheader("Jira")
 
-            jira_text = result["jira"]
-            match = re.search(r"KAN-\d+", jira_text)
+            jira_result = result["jira"]
 
-            if match:
-                st.success(f"✅ Issue Created: {match.group(0)}")
+            if isinstance(jira_result, dict):
+                if jira_result.get("success"):
+                    issue_key = jira_result.get("issue_key")
 
-            st.write(jira_text)
+                    if issue_key:
+                        st.success(f"Issue Created: {issue_key}")
+                    else:
+                        st.success(
+                            jira_result.get(
+                                "message",
+                                "Jira issue created successfully.",
+                            )
+                        )
+                else:
+                    st.error(
+                        jira_result.get(
+                            "message",
+                            "Jira operation failed.",
+                        )
+                    )
+
+                st.json(jira_result)
+
+            else:
+                jira_text = str(jira_result)
+                match = re.search(r"KAN-\d+", jira_text)
+
+                if match:
+                    st.success(f"Issue Created: {match.group(0)}")
+
+                st.write(jira_text)
     
     
      

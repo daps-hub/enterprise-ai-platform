@@ -38,39 +38,65 @@ class PlannerAgent:
 
     async def route_request(self, user_question: str):
         if not user_question.strip():
-            return "Please enter a question."
+            return {
+                "success": False,
+                "message": "Please enter a question.",
+            }
 
-        logger.info(f"User Question: {user_question}")
+        logger.info("User question: %s", user_question)
 
-        # Special workflow: generate report and email it
-        if "report" in user_question.lower() and "email" in user_question.lower():
+        # Deterministic end-to-end workflow
+        if (
+            "report" in user_question.lower()
+            and "email" in user_question.lower()
+        ):
             return await self.generate_report_and_email(user_question)
 
         decision = await self.choose_agent(user_question)
+
         print("Planner decision:", decision)
-        logger.info(f"Agent Selected: {decision}")
+        logger.info("Planner decision: %s", decision)
+
+        # Multi-agent workflow
         if "workflow" in decision:
+            workflow = decision["workflow"]
+
+            if not workflow:
+                return {
+                    "success": False,
+                    "message": "Planner returned an empty workflow.",
+                }
+
             workflow_agents = [
-                step["agent"] for step in decision["workflow"]
+                step["agent"]
+                for step in workflow
             ]
 
-            if "database_agent" in workflow_agents and "report_agent" in workflow_agents:
-                sales_summary = await self.database_agent.process_request(
-                    "Show me the sales summary"
+            # Database → Analytics → Report
+            if (
+                "database_agent" in workflow_agents
+                and "report_agent" in workflow_agents
+            ):
+                sales_summary = (
+                    await self.database_agent.process_request(
+                        "Show me the sales summary"
+                    )
                 )
 
-                analysis_result = await self.analytics_agent.process_request(
-                    "Analyze the sales summary.",
-                    sales_summary,
+                analysis_result = (
+                    await self.analytics_agent.process_request(
+                        "Analyze the sales summary.",
+                        sales_summary,
+                    )
                 )
 
                 return await self.report_agent.process_request(
                     user_question,
                     analysis_result["analysis"],
                 )
-        
-        if "workflow" in decision:
-            step = decision["workflow"][0]
+
+            # Execute first workflow step
+            step = workflow[0]
             agent = step["agent"]
             task = step["task"]
 
@@ -90,16 +116,30 @@ class PlannerAgent:
                 summary = await self.database_agent.process_request(
                     "Show me the sales summary"
                 )
-                return await self.report_agent.process_request(task, summary)
 
-        agent = decision["agent"]
-        if "report" in user_question.lower() and "email" in user_question.lower():
-            return await self.generate_report_and_email(user_question)
+                return await self.report_agent.process_request(
+                    task,
+                    summary,
+                )
+
+            return {
+                "success": False,
+                "message": f"Unknown workflow agent: {agent}",
+            }
+
+        # Single-agent decision
+        agent = decision.get("agent")
+
         if agent == "database_agent":
-            return await self.database_agent.process_request(user_question)
+            return await self.database_agent.process_request(
+                user_question
+            )
+
         if agent == "jira_agent":
-            return await self.jira_agent.process_request(user_question)
-        
+            return await self.jira_agent.process_request(
+                user_question
+            )
+
         if agent == "report_agent":
             summary = await self.database_agent.process_request(
                 "Show me the sales summary"
@@ -109,35 +149,54 @@ class PlannerAgent:
                 user_question,
                 summary,
             )
-        if agent == "crm_agent":
-            return await self.crm_agent.process_request(user_question)
-        if agent == "email_agent":
-            return await self.email_agent.process_request(user_question)
-        raise ValueError(f"Unknown agent: {agent}")
 
+        if agent == "crm_agent":
+            return await self.crm_agent.process_request(
+                user_question
+            )
+
+        if agent == "email_agent":
+            return await self.email_agent.process_request(
+                user_question
+            )
+
+        return {
+            "success": False,
+            "message": f"Unknown agent: {agent}",
+        }
     async def generate_report_and_email(
         self,
         user_question: str,
     ) -> dict:
 
-        # Database
         sales_summary = await self.database_agent.process_request(
             "Show me the sales summary"
         )
 
-        # Analytics
         analysis_result = await self.analytics_agent.process_request(
             "Analyze the sales summary.",
             sales_summary,
         )
+        if not isinstance(analysis_result, dict) or "analysis" not in analysis_result:
+            return {
+                "success": False,
+                "message": "Analytics generation failed.",
+                "analytics": analysis_result,
+            }
 
-        # Report
+
         report_result = await self.report_agent.process_request(
             "Generate an executive sales report",
             analysis_result["analysis"],
         )
 
-        # Review
+        if not report_result.get("success"):
+            return {
+                "success": False,
+                "message": "Report generation failed.",
+                "report": report_result,
+            }
+
         review = await self.reviewer_agent.process_request(
             json.dumps(
                 analysis_result["analysis"],
@@ -149,26 +208,29 @@ class PlannerAgent:
             return {
                 "success": False,
                 "message": "Reviewer rejected report.",
+                "report": report_result,
                 "review": review,
             }
 
-        # Email
-        email_result = await self.email_agent.process_request(
-            f"""
-    Send an email to dapo40@gmail.com
-    with subject Executive Sales Report
-    and body Attached is today's executive sales report
-    and attachment_path {report_result['file_path']}
-    """
+        email_result = await self.email_agent.send_report_email(
+            recipient="dapo40@gmail.com",
+            subject="Executive Sales Report",
+            body="Attached is today's executive sales report.",
+            attachment_path=report_result["file_path"],
         )
 
-        # Jira
-        jira_result = await self.jira_agent.process_request(
-            "Create a Jira task called Review Executive Sales Report"
-        )
+        jira_result = await self.jira_agent.create_report_review_issue()
+            
+        email_success = email_result.get("success", False)
+        jira_success = jira_result.get("success", False)
 
         return {
-            "success": True,
+            "success": email_success and jira_success,
+            "message": (
+                "Workflow completed successfully."
+                if email_success and jira_success
+                else "Workflow completed with integration errors."
+            ),
             "report": report_result,
             "review": review,
             "email": email_result,

@@ -1,6 +1,7 @@
 import asyncio
 from pathlib import Path
-
+import sys
+import os
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
@@ -10,13 +11,25 @@ class PostgresMCPClient:
         project_root = Path(__file__).resolve().parents[2]
 
         postgres_mcp_dir = project_root / "mcp_servers" / "postgres-mcp"
-        postgres_python = postgres_mcp_dir / "venv" / "Scripts" / "python.exe"
+        
         postgres_server = postgres_mcp_dir / "server.py"
+        if os.name == "nt":
+            postgres_python = (
+                postgres_mcp_dir
+                / "venv"
+                / "Scripts"
+                / "python.exe"
+            )
 
+            if not postgres_python.exists():
+                postgres_python = Path(sys.executable)
+        else:
+            postgres_python = Path(sys.executable)
         self.server_params = StdioServerParameters(
             command=str(postgres_python),
             args=[str(postgres_server)],
             cwd=str(postgres_mcp_dir),
+            env=os.environ.copy(),
         )
 
     async def get_sales_summary(self):

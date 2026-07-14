@@ -3,7 +3,7 @@ import asyncio
 from pathlib import Path
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
-
+import sys
 
 class SalesforceMCPClient:
 

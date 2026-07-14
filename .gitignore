@@ -21,3 +21,6 @@ agents/report_agent/reports/*.pdf
 
 Thumbs.db
 .DS_Store
+task-definition.json
+# Database backups
+*.backup

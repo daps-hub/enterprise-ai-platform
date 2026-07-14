@@ -1,8 +1,9 @@
 import asyncio
 from pathlib import Path
-
+import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+import os
 
 
 class EmailMCPClient:
@@ -10,13 +11,25 @@ class EmailMCPClient:
         project_root = Path(__file__).resolve().parents[2]
 
         email_mcp_dir = project_root / "mcp_servers" / "email-mcp"
-        email_python = email_mcp_dir / "venv" / "Scripts" / "python.exe"
+        email_python = sys.executable
         email_server = email_mcp_dir / "server.py"
+        if os.name == "nt":
+            email_python = (
+                email_mcp_dir
+                / "venv"
+                / "Scripts"
+                / "python.exe"
+            )
 
+            if not email_python.exists():
+                email_python = Path(sys.executable)
+        else:
+            email_python = Path(sys.executable)
         self.server_params = StdioServerParameters(
             command=str(email_python),
             args=[str(email_server)],
             cwd=str(email_mcp_dir),
+            env=os.environ.copy(),
         )
 
     async def call_tool(self, tool_name: str, arguments: dict):
@@ -43,21 +56,21 @@ class EmailMCPClient:
         )
 
     async def send_email_with_attachment(
-        self,
-        to: str,
-        subject: str,
-        body: str,
-        attachment_path: str,
+    self,
+    recipient: str,
+    subject: str,
+    body: str,
+    attachment_path: str,
     ):
         return await self.call_tool(
             "send_email_with_attachment",
             {
-                "to": to,
+                "recipient": recipient,
                 "subject": subject,
                 "body": body,
                 "attachment_path": attachment_path,
             },
-        )
+    )
 
     async def list_tools(self):
         async with stdio_client(self.server_params) as (read, write):

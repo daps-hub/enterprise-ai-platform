@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-
+import logging
 from dotenv import load_dotenv
 from jira import JIRA
 from mcp.server.fastmcp import FastMCP
@@ -15,7 +15,7 @@ def get_jira_client():
     jira_token = os.getenv("JIRA_API_TOKEN")
 
     if not jira_url:
-        raise ValueError("JIRA_URL is missing from .env")
+        raise ValueError("JIRA_URL environment variable is missing")
 
     if not jira_email:
         raise ValueError("JIRA_EMAIL is missing from .env")
@@ -211,5 +211,10 @@ def transition_issue(
             "success": False,
             "message": str(e),
         }
+        
+        logging.basicConfig(level=logging.INFO)
+        logger = logging.getLogger(__name__)
+
+        logger.info("Jira MCP server starting")
 if __name__ == "__main__":
     mcp.run(transport="stdio")
