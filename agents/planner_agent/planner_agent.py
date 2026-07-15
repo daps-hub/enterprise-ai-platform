@@ -1,40 +1,100 @@
 import asyncio
 import json
 
-
-from agents.planner_agent.logger import logger
-from agents.planner_agent.openai_client import get_openai_client, get_model_name
-from agents.planner_agent.prompt import SYSTEM_PROMPT
-from agents.email_agent.email_agent import EmailAgent
-from agents.database_agent.database_agent import DatabaseAgent
-from agents.crm_agent.crm_agent import CRMAgent
-from agents.report_agent.report_agent import ReportAgent
-from agents.jira_agent.jira_agent import JiraAgent
 from agents.analytics_agent.analytics_agent import AnalyticsAgent
+from agents.crm_agent.crm_agent import CRMAgent
+from agents.database_agent.database_agent import DatabaseAgent
+from agents.email_agent.email_agent import EmailAgent
+from agents.jira_agent.jira_agent import JiraAgent
+from agents.planner_agent.logger import logger
+from agents.planner_agent.openai_client import (
+    get_model_name,
+    get_openai_client,
+)
+from agents.planner_agent.prompt import SYSTEM_PROMPT
+from agents.report_agent.report_agent import ReportAgent
 from agents.reviewer_agent.reviewer_agent import ReviewerAgent
+
+
+BUSINESS_KEYWORDS = [
+    "why",
+    "risk",
+    "risks",
+    "recommend",
+    "recommendation",
+    "recommendations",
+    "strategy",
+    "strategic",
+    "management",
+    "vp of sales",
+    "next quarter",
+    "underperform",
+    "underperforming",
+    "actions should",
+    "action should",
+    "business insight",
+    "business insights",
+    "what should",
+]
+
+
 class PlannerAgent:
     def __init__(self):
         self.client = get_openai_client()
-        self.analytics_agent = AnalyticsAgent()
         self.model = get_model_name()
+
+        self.analytics_agent = AnalyticsAgent()
         self.jira_agent = JiraAgent()
         self.database_agent = DatabaseAgent()
         self.crm_agent = CRMAgent()
         self.email_agent = EmailAgent()
         self.report_agent = ReportAgent()
         self.reviewer_agent = ReviewerAgent()
+
     async def choose_agent(self, user_question: str) -> dict:
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": user_question},
+                {
+                    "role": "system",
+                    "content": SYSTEM_PROMPT,
+                },
+                {
+                    "role": "user",
+                    "content": user_question,
+                },
             ],
             temperature=0,
         )
 
         decision_text = response.choices[0].message.content
         return json.loads(decision_text)
+
+    async def handle_business_question(
+        self,
+        user_question: str,
+    ) -> dict:
+        """
+        Answer executive, risk, strategy, and recommendation questions by
+        retrieving actual sales data before invoking the Analytics Agent.
+        """
+
+        sales_summary = await self.database_agent.process_request(
+            "Show me the sales summary"
+        )
+
+        if not sales_summary:
+            return {
+                "success": False,
+                "message": "No sales data was returned.",
+            }
+
+        analysis_result = await self.analytics_agent.process_request(
+            user_request=user_question,
+            source_data=str(sales_summary),
+        )
+
+        return analysis_result
 
     async def route_request(self, user_question: str):
         if not user_question.strip():
@@ -45,12 +105,25 @@ class PlannerAgent:
 
         logger.info("User question: %s", user_question)
 
+        question_lower = user_question.lower()
+
         # Deterministic end-to-end workflow
-        if (
-            "report" in user_question.lower()
-            and "email" in user_question.lower()
+        if "report" in question_lower and "email" in question_lower:
+            return await self.generate_report_and_email(
+                user_question
+            )
+        if "crm" in question_lower:
+            return await self.crm_agent.process_request(user_question)
+
+        # Business reasoning workflow:
+        # Database Agent -> Analytics Agent
+        if any(
+            keyword in question_lower
+            for keyword in BUSINESS_KEYWORDS
         ):
-            return await self.generate_report_and_email(user_question)
+            return await self.handle_business_question(
+                user_question
+            )
 
         decision = await self.choose_agent(user_question)
 
@@ -72,7 +145,7 @@ class PlannerAgent:
                 for step in workflow
             ]
 
-            # Database → Analytics → Report
+            # Database -> Analytics -> Report
             if (
                 "database_agent" in workflow_agents
                 and "report_agent" in workflow_agents
@@ -85,10 +158,20 @@ class PlannerAgent:
 
                 analysis_result = (
                     await self.analytics_agent.process_request(
-                        "Analyze the sales summary.",
-                        sales_summary,
+                        user_request="Analyze the sales summary.",
+                        source_data=str(sales_summary),
                     )
                 )
+
+                if (
+                    not isinstance(analysis_result, dict)
+                    or "analysis" not in analysis_result
+                ):
+                    return {
+                        "success": False,
+                        "message": "Analytics generation failed.",
+                        "analytics": analysis_result,
+                    }
 
                 return await self.report_agent.process_request(
                     user_question,
@@ -105,6 +188,9 @@ class PlannerAgent:
 
             if agent == "database_agent":
                 return await self.database_agent.process_request(task)
+
+            if agent == "analytics_agent":
+                return await self.handle_business_question(task)
 
             if agent == "crm_agent":
                 return await self.crm_agent.process_request(task)
@@ -132,6 +218,11 @@ class PlannerAgent:
 
         if agent == "database_agent":
             return await self.database_agent.process_request(
+                user_question
+            )
+
+        if agent == "analytics_agent":
+            return await self.handle_business_question(
                 user_question
             )
 
@@ -164,26 +255,29 @@ class PlannerAgent:
             "success": False,
             "message": f"Unknown agent: {agent}",
         }
+
     async def generate_report_and_email(
         self,
         user_question: str,
     ) -> dict:
-
         sales_summary = await self.database_agent.process_request(
             "Show me the sales summary"
         )
 
         analysis_result = await self.analytics_agent.process_request(
-            "Analyze the sales summary.",
-            sales_summary,
+            user_request="Analyze the sales summary.",
+            source_data=str(sales_summary),
         )
-        if not isinstance(analysis_result, dict) or "analysis" not in analysis_result:
+
+        if (
+            not isinstance(analysis_result, dict)
+            or "analysis" not in analysis_result
+        ):
             return {
                 "success": False,
                 "message": "Analytics generation failed.",
                 "analytics": analysis_result,
             }
-
 
         report_result = await self.report_agent.process_request(
             "Generate an executive sales report",
@@ -219,8 +313,10 @@ class PlannerAgent:
             attachment_path=report_result["file_path"],
         )
 
-        jira_result = await self.jira_agent.create_report_review_issue()
-            
+        jira_result = (
+            await self.jira_agent.create_report_review_issue()
+        )
+
         email_success = email_result.get("success", False)
         jira_success = jira_result.get("success", False)
 
@@ -236,6 +332,7 @@ class PlannerAgent:
             "email": email_result,
             "jira": jira_result,
         }
+
 
 async def main():
     planner = PlannerAgent()

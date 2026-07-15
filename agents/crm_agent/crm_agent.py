@@ -30,18 +30,18 @@ class CRMAgent:
 
         tool_map = {
             "search_accounts": lambda: self.mcp.search_accounts(
-                arguments["account_name"]
-            ),
-            "get_account": lambda: self.mcp.get_account(
-                arguments["account_id"]
-            ),
-            "search_contacts": lambda: self.mcp.search_contacts(
-                arguments["contact_name"]
-            ),
-            "search_opportunities": lambda: self.mcp.search_opportunities(
-                arguments["opportunity_name"]
-            ),
-            "list_open_opportunities": lambda: self.mcp.list_open_opportunities(),
+            arguments.get("account_name", "")
+        ),
+        "get_account": lambda: self.mcp.get_account(
+            arguments["account_id"]
+        ),
+        "search_contacts": lambda: self.mcp.search_contacts(
+            arguments.get("contact_name", "")
+        ),
+        "search_opportunities": lambda: self.mcp.search_opportunities(
+            arguments.get("opportunity_name", "")
+        ),
+        "list_open_opportunities": lambda: self.mcp.list_open_opportunities(),
         }
 
         if tool not in tool_map:
